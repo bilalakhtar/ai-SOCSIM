@@ -1,0 +1,6 @@
+{
+  "name": "CyberDefense SOC Simulator",
+  "description": "A cybersecurity incident response game where you play as a SOC analyst handling realistic security threats.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["Scenario Simulation", "Decision Tracking", "Performance Analysis"]
+}
