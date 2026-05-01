@@ -18,17 +18,74 @@ import {
   Zap
 } from 'lucide-react';
 import { GameState, DecisionRecord, FinalReport } from './types.ts';
-import { generateScenario, processDecision, generateFinalReport } from './lib/gemini.ts';
+import { calculateRank, generateScenario, processDecision, generateFinalReport } from './lib/gemini.ts';
 
 const MAX_ROUNDS = 5;
+
+const TelemetryFeed = () => {
+  const [logs, setLogs] = useState<string[]>([]);
+  
+  useEffect(() => {
+    const prefixes = ['SIEM', 'WAF', 'EDR', 'IDS', 'IAM', 'SYS'];
+    const events = [
+      'Failed login attempt',
+      'Port scan detected',
+      'Outbound TLS tunnel',
+      'PowerShell spawned',
+      'File rename: .locked',
+      'Admin session opened',
+      'GeoIP mismatch'
+    ];
+    
+    const interval = setInterval(() => {
+      const log = `[${new Date().toLocaleTimeString()}] ${prefixes[Math.floor(Math.random() * prefixes.length)]}: ${events[Math.floor(Math.random() * events.length)]}`;
+      setLogs(prev => [log, ...prev].slice(0, 15));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="space-y-1 font-mono text-[9px] text-blue-500/50 leading-none h-40 overflow-hidden mask-fade-bottom">
+      {logs.map((l, i) => (
+        <div key={i} className="flex gap-2">
+          <span className="shrink-0 text-blue-800">{">>>"}</span>
+          <span className="truncate">{l}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const MitreMap = ({ activeStage }: { activeStage?: string }) => {
+  const stages = [
+    'Initial Access', 'Execution', 'Persistence', 'Privilege Escalation',
+    'Defense Evasion', 'Discovery', 'Lateral Movement', 'Exfiltration', 'Impact'
+  ];
+  
+  return (
+    <div className="grid grid-cols-3 gap-1 pt-4">
+      {stages.map(s => (
+        <div 
+          key={s} 
+          className={`px-1 py-0.5 border text-[8px] font-mono tracking-tighter uppercase text-center truncate ${activeStage === s ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'border-slate-800 text-slate-600 bg-slate-900/40'}`}
+        >
+          {s}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 export default function App() {
   const [state, setState] = useState<GameState>({
     round: 0,
     score: 0,
+    xp: 0,
+    rank: 'Trainee Analyst',
     riskLevel: 20,
     confidenceLevel: 50,
     history: [],
+    activeFlags: [],
     status: 'start',
   });
 
@@ -39,9 +96,12 @@ export default function App() {
     setState({
       round: 1,
       score: 0,
+      xp: 0,
+      rank: 'Trainee Analyst',
       riskLevel: 20,
       confidenceLevel: 50,
       history: [],
+      activeFlags: [],
       status: 'playing',
     });
     loadNextRound(1);
@@ -76,15 +136,23 @@ export default function App() {
         isCorrect: feedback.scoreDelta > 0,
       };
 
-      setState(prev => ({
-        ...prev,
-        score: Math.max(0, prev.score + feedback.scoreDelta),
-        riskLevel: Math.max(0, Math.min(100, prev.riskLevel + feedback.riskDelta)),
-        confidenceLevel: Math.max(0, Math.min(100, prev.confidenceLevel + feedback.confidenceDelta)),
-        history: [...prev.history, record],
-        currentFeedback: feedback,
-        status: 'round_feedback'
-      }));
+      setState(prev => {
+        const nextScore = Math.max(0, prev.score + feedback.scoreDelta);
+        const nextXp = prev.xp + (feedback.scoreDelta > 0 ? 100 : 20);
+        
+        return {
+          ...prev,
+          score: nextScore,
+          xp: nextXp,
+          rank: calculateRank(nextScore),
+          riskLevel: Math.max(0, Math.min(100, prev.riskLevel + feedback.riskDelta)),
+          confidenceLevel: Math.max(0, Math.min(100, prev.confidenceLevel + feedback.confidenceDelta)),
+          history: [...prev.history, record],
+          currentFeedback: feedback,
+          activeFlags: selectedOption?.flag ? [...prev.activeFlags, selectedOption.flag] : prev.activeFlags,
+          status: 'round_feedback'
+        };
+      });
     } catch (error) {
       console.error("Failed to process decision:", error);
     } finally {
@@ -110,7 +178,14 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden">
+    <div className="h-screen bg-slate-950 text-slate-100 flex flex-col font-sans overflow-hidden relative">
+      {/* Cinematic Overlays */}
+      <div className="absolute inset-0 pointer-events-none z-50">
+        <div className="absolute inset-0 scanline opacity-[0.03]"></div>
+        <div className="absolute inset-0 scanner-sweep opacity-[0.02]"></div>
+        <div className="absolute inset-0 crt-flicker opacity-[0.01]"></div>
+      </div>
+
       {/* Header */}
       <header className="h-16 border-b border-slate-800 px-8 flex items-center justify-between bg-slate-900/50 shrink-0">
         <div className="flex items-center gap-4">
@@ -184,6 +259,9 @@ export default function App() {
                   <div className="mb-8">
                     <label className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 block font-mono">Mission Score</label>
                     <div className="text-4xl font-light tracking-tighter text-white font-mono">{state.score.toLocaleString()}</div>
+                    <div className="text-[9px] font-mono text-blue-500 mt-1 uppercase tracking-widest">
+                      XP: {state.xp} / Rank: {state.rank}
+                    </div>
                   </div>
                   
                   <div className="space-y-6">
@@ -214,28 +292,35 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex-1 p-6 overflow-hidden flex flex-col">
-                  <label className="text-[10px] uppercase tracking-widest text-slate-500 mb-6 block font-mono">Incident Log</label>
-                  <div className="space-y-6 flex-1 overflow-y-auto custom-scrollbar pr-2">
-                    {state.history.length === 0 ? (
-                      <div className="flex gap-3 items-start opacity-50">
-                        <div className="w-1 h-8 bg-slate-700"></div>
-                        <div>
-                          <p className="text-[11px] font-mono leading-tight text-slate-500 italic">SYSTEM READY...</p>
-                          <p className="text-[10px] text-zinc-600">Waiting for trigger</p>
+                <div className="flex-1 p-6 overflow-hidden flex flex-col gap-8">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest text-slate-500 mb-4 block font-mono">MITRE ATT&CK Mapping</label>
+                    <MitreMap activeStage={state.currentScenario?.mitreStage} />
+                  </div>
+
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <label className="text-[10px] uppercase tracking-widest text-slate-500 mb-4 block font-mono">Live Telemetry Feed</label>
+                    <TelemetryFeed />
+                  </div>
+                  
+                  <div className="shrink-0 h-32 flex flex-col">
+                    <label className="text-[10px] uppercase tracking-widest text-slate-500 mb-4 block font-mono">Operational Chain</label>
+                    <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-2">
+                       {state.history.length === 0 ? (
+                        <div className="flex gap-2 items-center opacity-30 text-[10px] font-mono">
+                          <Activity size={10} className="animate-pulse" />
+                          WAITING FOR INCIDENT...
                         </div>
-                      </div>
-                    ) : [...state.history].reverse().map((h, i) => (
-                      <div key={i} className="flex gap-3 items-start">
-                        <div className={`w-1 h-8 ${h.isCorrect ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
-                        <div>
-                          <p className="text-[11px] font-mono leading-tight text-slate-300 uppercase truncate max-w-[180px]">{h.userDecision}</p>
-                          <p className={`text-[10px] font-mono ${h.isCorrect ? 'text-emerald-500/70' : 'text-red-500/70'}`}>
-                            {h.round < 10 ? `0${h.round}` : h.round}:00:00 - {h.isCorrect ? 'STABILIZED' : 'BREACH'}
-                          </p>
+                      ) : [...state.history].reverse().slice(0, 3).map((h, i) => (
+                        <div key={i} className="flex gap-3 items-start">
+                          <div className={`w-1 h-6 ${h.isCorrect ? 'bg-blue-500' : 'bg-red-500'}`}></div>
+                          <div>
+                            <p className="text-[10px] font-mono leading-tight text-slate-400 uppercase truncate max-w-[150px]">{h.userDecision}</p>
+                            <p className="text-[8px] font-mono text-slate-600">{h.isCorrect ? 'STABILIZED' : 'BREACH'}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -287,9 +372,27 @@ export default function App() {
                         
                         <div className="bg-slate-900/40 border border-slate-800 p-8 rounded-lg relative overflow-hidden group">
                           <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/50 group-hover:bg-blue-500 transition-colors" />
-                          <p className="text-slate-300 leading-relaxed font-mono text-sm">
+                          <p className="text-slate-300 leading-relaxed font-mono text-sm mb-6">
                             {loading ? "Waiting for data packets..." : state.currentScenario?.description}
                           </p>
+
+                          {/* Artifacts View */}
+                          {!loading && state.currentScenario?.artifacts && (
+                            <div className="mt-8 space-y-4">
+                              <label className="text-[9px] uppercase tracking-widest text-blue-500 font-mono">Attached Evidence Artifacts</label>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {state.currentScenario.artifacts.map((art, idx) => (
+                                  <div key={idx} className="bg-black/40 border border-slate-800 p-3 rounded font-mono text-[10px] text-slate-500">
+                                    <div className="flex justify-between border-b border-white/5 pb-1 mb-2">
+                                      <span className="text-blue-400/70 text-[9px] uppercase">{art.label}</span>
+                                      <span className="text-[8px] opacity-30">TYPE: {art.type.toUpperCase()}</span>
+                                    </div>
+                                    <div className="whitespace-pre-wrap leading-tight">{art.content}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -329,8 +432,18 @@ export default function App() {
                         </div>
                         <div className="space-y-4">
                           <h2 className="text-4xl font-light text-white tracking-tighter uppercase">{state.currentFeedback.consequence}</h2>
-                          <div className="max-w-xl mx-auto p-8 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400 font-mono italic text-sm leading-relaxed">
-                            {state.currentFeedback.explanation}
+                          <div className="max-w-xl mx-auto p-8 bg-slate-900/60 border border-slate-800 rounded-xl space-y-4">
+                            <p className="text-slate-400 font-mono italic text-sm leading-relaxed">
+                              {state.currentFeedback.explanation}
+                            </p>
+                            {state.currentFeedback.chainEffect && (
+                              <div className="pt-4 border-t border-slate-800">
+                                <span className="text-[10px] text-blue-500 font-mono uppercase tracking-widest block mb-1">Operational Chain Effect</span>
+                                <p className="text-blue-200/70 font-mono text-xs leading-relaxed">
+                                  {state.currentFeedback.chainEffect}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -378,8 +491,13 @@ export default function App() {
                     </div>
                     <div className="w-px h-16 bg-slate-800" />
                     <div className="text-center">
+                      <div className="text-slate-500 text-[10px] font-mono uppercase tracking-widest mb-2">Analyst XP</div>
+                      <div className="text-5xl font-light text-blue-500 font-mono">{state.xp}</div>
+                    </div>
+                    <div className="w-px h-16 bg-slate-800" />
+                    <div className="text-center">
                       <div className="text-slate-500 text-[10px] font-mono uppercase tracking-widest mb-2">Risk Mitigated</div>
-                      <div className="text-5xl font-light text-blue-500 font-mono">{100 - state.riskLevel}%</div>
+                      <div className="text-5xl font-light text-emerald-500 font-mono">{100 - state.riskLevel}%</div>
                     </div>
                   </div>
                 </div>
@@ -393,8 +511,9 @@ export default function App() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div className="bg-slate-900/40 border border-slate-800 rounded-lg p-8 space-y-8">
                       <div className="text-center pb-6 border-b border-slate-800">
-                        <div className="text-slate-500 text-[10px] font-mono uppercase tracking-[0.2em] mb-2">Internal Rating</div>
-                        <div className="text-3xl font-bold text-white uppercase italic tracking-tighter">{report.rating}</div>
+                        <div className="text-slate-500 text-[10px] font-mono uppercase tracking-[0.2em] mb-2">Credential Issued</div>
+                        <div className="text-3xl font-bold text-white uppercase italic tracking-tighter">{report.rankTitle}</div>
+                        <div className="text-[10px] text-blue-500 font-mono mt-2">{report.rating}</div>
                       </div>
                       
                       <div className="space-y-4">

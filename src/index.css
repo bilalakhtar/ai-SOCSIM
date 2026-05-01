@@ -8,8 +8,55 @@
 
 @layer base {
   body {
-    @apply bg-slate-950 text-slate-100 font-sans antialiased;
+    @apply bg-slate-950 text-slate-100 font-sans antialiased overflow-hidden;
   }
+}
+
+@layer utilities {
+  .crt-flicker {
+    animation: crt-flicker 0.15s infinite;
+  }
+  
+  .scanline {
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(18, 16, 16, 0.1) 50%,
+      transparent 100%
+    );
+    background-size: 100% 4px;
+    animation: scanline 10s linear infinite;
+  }
+
+  .scanner-sweep {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(59, 130, 246, 0.05) 50%,
+      transparent 100%
+    );
+    animation: scanner 4s ease-in-out infinite;
+  }
+
+  .mask-fade-bottom {
+    mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+  }
+}
+
+@keyframes crt-flicker {
+  0% { opacity: 0.99; }
+  50% { opacity: 0.97; }
+  100% { opacity: 0.99; }
+}
+
+@keyframes scanline {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes scanner {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 @layer utilities {
